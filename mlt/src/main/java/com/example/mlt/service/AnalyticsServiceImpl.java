@@ -48,7 +48,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     }
 
     @Override
-    public List<Document> getMLTDocs(String docId) {
+    public List<Document> getMLTDocs(String customerId, String docId, int pageNum, int pageSize) {
 
         QueryBuilder queryBuilder =
                 QueryBuilders
@@ -72,9 +72,9 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     }
 
     @Override
-    public Optional<String> getClassification(String docId) {
+    public Optional<String> getClassification(String customerId, String docId) {
 
-        List<Document> mltDocs = getMLTDocs(docId);
+        List<Document> mltDocs = getMLTDocs(null, docId, 0, 20);
         Optional<String> label = mltDocs.stream().collect(
                 Collectors.groupingBy(Document::getLabel, Collectors.counting()))
                 .entrySet().stream().max(Comparator.comparing(Map.Entry::getValue))
@@ -83,7 +83,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     }
 
     @Override
-    public List<ParentDocument> getDuplicateDocGroups() {
+    public List<ParentDocument> getDuplicateDocGroups(String customerId, String afterKey) {
         String aggName = "aggByDuplicateId";
         String field = "duplicateId";
 
@@ -163,12 +163,12 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     }
 
     @Override
-    public List<Document> getDuplicateDocs(String docId) {
+    public List<Document> getDuplicateDocs(String customerId, String docId, int pageNum, int pageSize) {
         return documentRepository.findDocumentsByDuplicateId(docId);
     }
 
     @Override
-    public List<Discrepancy> getDiscrepancies() {
+    public List<Discrepancy> getDiscrepancies(String custmerId, String afterKey) {
 
         String aggName = "groupByLabel";
         String field = "label";

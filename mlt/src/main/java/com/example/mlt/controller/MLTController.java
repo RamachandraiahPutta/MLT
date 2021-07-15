@@ -21,11 +21,11 @@ public class MLTController {
 
     @PostMapping("/mltDocs")
     public List<Document> findMLTDocs(@RequestBody EsDocument doc) {
-        return mltDocsService.getMLTDocs(doc.getId());
+        return mltDocsService.getMLTDocs(null, doc.getId(), 0, 20);
     }
 
     @PostMapping("/classification")
     public Optional<String> getClassification(@RequestBody EsDocument doc) {
-        return mltDocsService.getClassification(doc.getId());
+        return mltDocsService.getClassification(null, doc.getId());
     }
 }

@@ -9,13 +9,29 @@ import java.util.Optional;
 
 public interface AnalyticsService {
 
-    public List<ParentDocument> getDuplicateDocGroups();
+    /* returns Duplicate document groups per customer
+    *  by default it will return only 20 groups
+    *  provide last group key to fetch next page
+    * */
+    public List<ParentDocument> getDuplicateDocGroups(String customerId, String afterKey);
 
-    public List<Document> getDuplicateDocs(String docId);
+    /*  returns duplicate documents for a original document.
+     *  provide pageNum and pageSize to fetch next page
+     * */
+    public List<Document> getDuplicateDocs(String customerId, String docId, int pageNum, int pageSize);
 
-    public List<Document> getMLTDocs(String docId);
+    /*  returns more like this documents for a original document.
+     *  provide pageNum and pageSize to fetch next page
+     * */
+    public List<Document> getMLTDocs(String customerId, String docId, int pageNum, int pageSize);
 
-    public Optional<String> getClassification(String docId);
+    /*  returns recommended classification string for given document id.
+     * */
+    public Optional<String> getClassification(String customerId, String docId);
 
-    public List<Discrepancy> getDiscrepancies();
+    /*  returns Discrepancy Groups for given customer.
+     *  by default it will return only 20 groups
+     *  provide last group key to fetch next page
+     * */
+    public List<Discrepancy> getDiscrepancies(String customerId, String afterKey);
 }
