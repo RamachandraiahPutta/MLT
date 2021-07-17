@@ -24,11 +24,6 @@ public class MLTController {
         return mltDocsService.getMLTDocs(null, doc.getId(), 0, 20);
     }
 
-    @PostMapping("/classification")
-    public Optional<String> getClassification(@RequestBody EsDocument doc) {
-        return mltDocsService.getClassification(null, doc.getId());
-    }
-
     @GetMapping("/duplicates")
     public AggResult<List<ParentDocument>> getDuplicateDocGroups(@RequestParam(value = "customerId") String customerId) {
         return mltDocsService.getDuplicateDocGroups(customerId, null);

@@ -27,13 +27,19 @@ public interface AnalyticsService {
      * */
     public List<Document> getMLTDocs(String customerId, String docId, int pageNum, int pageSize);
 
-    /*  returns recommended classification string for given document id.
+    /*  returns unlabelled documents for a customer.
      * */
-    public Optional<String> getClassification(String customerId, String docId);
+    public List<Document> getUnlabelledDocuments(String customerId, int pageNum, int pageSize);
 
     /*  returns Discrepancy Groups for given customer.
      *  by default it will return only 20 groups
      *  provide last group key to fetch next page
      * */
     public AggResult<List<Discrepancy>> getDiscrepancies(String customerId, Map<String, Object> afterKey);
+
+    /*
+     * will tag recommended label and duplicate document Id
+     * use Analytics Service to fetch recommended label and duplicate document id
+     * */
+    public boolean tagDuplicate(String customerId, String docId);
 }

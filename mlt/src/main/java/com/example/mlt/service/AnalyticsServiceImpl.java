@@ -22,9 +22,7 @@ import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
 import org.springframework.data.elasticsearch.core.SearchHit;
 import org.springframework.data.elasticsearch.core.SearchHits;
 import org.springframework.data.elasticsearch.core.mapping.IndexCoordinates;
-import org.springframework.data.elasticsearch.core.query.NativeSearchQuery;
-import org.springframework.data.elasticsearch.core.query.NativeSearchQueryBuilder;
-import org.springframework.data.elasticsearch.core.query.Query;
+import org.springframework.data.elasticsearch.core.query.*;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -71,14 +69,17 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     }
 
     @Override
-    public Optional<String> getClassification(String customerId, String docId) {
+    public List<Document> getUnlabelledDocuments(String customerId, int pageNum, int pageSize) {
+        QueryBuilder queryBuilder = QueryBuilders.boolQuery()
+                .must(QueryBuilders.termQuery("clientid", customerId))
+                .mustNot(QueryBuilders.existsQuery("label"));
 
-        List<Document> mltDocs = getMLTDocs(null, docId, 0, 20);
-        Optional<String> label = mltDocs.stream().collect(
-                Collectors.groupingBy(Document::getLabel, Collectors.counting()))
-                .entrySet().stream().max(Comparator.comparing(Map.Entry::getValue))
-                .map(Map.Entry::getKey);
-        return label;
+        NativeSearchQuery searchQuery = new NativeSearchQueryBuilder()
+                .withQuery(queryBuilder)
+                .build()
+                .setPageable(PageRequest.of(pageNum, pageSize));
+
+        return getDocumentsForQuery(searchQuery, Document.class);
     }
 
     @Override
@@ -214,7 +215,6 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         if (Objects.nonNull(afterKey))
             aggBuilder.aggregateAfter(afterKey);
 
-
         String subAggName = "byCompositeField";
         String subAggField = "mc_type";
         AbstractAggregationBuilder subAggBuilder =
@@ -255,5 +255,31 @@ public class AnalyticsServiceImpl implements AnalyticsService {
             discrepanciesList.add(new Discrepancy(systemClassification, userClassification));
         }
         return new AggResult<>(discrepanciesList, null);
+    }
+
+    @Override
+    public boolean tagDuplicate(String customerId, String docId) {
+        List<Document> mltDocs = getMLTDocs(customerId, docId, 0, 20);
+        if (mltDocs.isEmpty())
+            return false;
+        Document parentDocument = mltDocs.get(0);
+        Optional<String> label = getClassification(mltDocs);
+
+        String script = "";
+        UpdateQuery updateQuery = UpdateQuery.builder(docId).withScript(script).build();
+
+        UpdateResponse updateResponse =  elasticsearchOperations.update(updateQuery, IndexCoordinates.of(DOCS_INDEX));
+
+        return false;
+    }
+
+
+    private Optional<String> getClassification(List<Document> mltDocs) {
+
+        Optional<String> label = mltDocs.stream().collect(
+                Collectors.groupingBy(Document::getLabel, Collectors.counting()))
+                .entrySet().stream().max(Comparator.comparing(Map.Entry::getValue))
+                .map(Map.Entry::getKey);
+        return label;
     }
 }
