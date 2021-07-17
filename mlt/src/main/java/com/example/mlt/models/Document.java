@@ -1,10 +1,13 @@
 package com.example.mlt.models;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import lombok.ToString;
 import lombok.experimental.SuperBuilder;
+import org.springframework.data.annotation.Id;
 
 import java.util.Date;
 
@@ -12,7 +15,10 @@ import java.util.Date;
 @Setter
 @NoArgsConstructor
 @SuperBuilder
+@JsonIgnoreProperties(ignoreUnknown = true)
+@ToString
 public class Document {
+    @Id
     public String id;
     public String uri;
     @JsonProperty(value = "clientid")
@@ -31,9 +37,9 @@ public class Document {
     public Date indexDate;
     @JsonProperty(value = "mimetype")
     public String mimeType;
-    public Object author;
+    public String author;
     @JsonProperty(value = "resourcename")
-    public Object resourceName;
+    public String resourceName;
     @JsonProperty(value = "targetPartition")
     public String targetpartition;
     public String targetFolder;
@@ -44,17 +50,17 @@ public class Document {
     @JsonProperty(value = "src_directory_structure")
     public String srcDirectoryStructure;
     @JsonProperty(value = "contenttype")
-    public Object contentType;
-    public Object dmsId;
+    public String contentType;
+    public String dmsId;
     @JsonProperty(value = "mc_type")
-    public Object mcType;
+    public String mcType;
     @JsonProperty(value = "mc_subType")
-    public Object mcSubType;
+    public String mcSubType;
     @JsonProperty(value = "mc_resolve_type")
     public int mcResolveType;
     public String extension;
     public String sourcePath;
-    public Object modifiedBy;
+    public String modifiedBy;
     public String duplicateId;
     public String label;
 }

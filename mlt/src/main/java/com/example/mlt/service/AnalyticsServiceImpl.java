@@ -1,10 +1,7 @@
 package com.example.mlt.service;
 
-import com.example.mlt.models.Discrepancy;
-import com.example.mlt.models.Document;
-import com.example.mlt.models.Pair;
-import com.example.mlt.models.ParentDocument;
-import com.example.mlt.repository.DocumentRepository;
+import com.example.mlt.models.*;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.elasticsearch.index.query.MoreLikeThisQueryBuilder;
@@ -13,9 +10,14 @@ import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.search.aggregations.AbstractAggregationBuilder;
 import org.elasticsearch.search.aggregations.AggregationBuilders;
 import org.elasticsearch.search.aggregations.Aggregations;
+import org.elasticsearch.search.aggregations.bucket.composite.CompositeAggregation;
+import org.elasticsearch.search.aggregations.bucket.composite.CompositeAggregationBuilder;
+import org.elasticsearch.search.aggregations.bucket.composite.CompositeValuesSourceBuilder;
+import org.elasticsearch.search.aggregations.bucket.composite.TermsValuesSourceBuilder;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
 import org.elasticsearch.search.aggregations.metrics.TopHits;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
 import org.springframework.data.elasticsearch.core.SearchHit;
 import org.springframework.data.elasticsearch.core.SearchHits;
@@ -37,14 +39,10 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     @Autowired
     private ObjectMapper objectMapper;
 
-    private DocumentRepository documentRepository;
-
     private ElasticsearchOperations elasticsearchOperations;
 
-    public AnalyticsServiceImpl(ElasticsearchOperations elasticsearchOperations,
-                                DocumentRepository documentRepository) {
+    public AnalyticsServiceImpl(ElasticsearchOperations elasticsearchOperations) {
         this.elasticsearchOperations = elasticsearchOperations;
-        this.documentRepository = documentRepository;
     }
 
     @Override
@@ -66,7 +64,8 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
         Query searchQuery = new NativeSearchQueryBuilder()
                 .withQuery(queryBuilder)
-                .build();
+                .build()
+                .setPageable(PageRequest.of(pageNum, pageSize));
 
         return getDocumentsForQuery(searchQuery, Document.class);
     }
@@ -83,15 +82,20 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     }
 
     @Override
-    public List<ParentDocument> getDuplicateDocGroups(String customerId, String afterKey) {
-        String aggName = "aggByDuplicateId";
-        String field = "duplicateId";
+    public AggResult<List<ParentDocument>> getDuplicateDocGroups(String customerId, Map<String, Object> afterKey) {
+        String aggName = "aggByduplicateId";
+        String field = "duplicateId.keyword";
 
-        AbstractAggregationBuilder aggBuilder =
+        List<CompositeValuesSourceBuilder<?>> sourceBuilderList = new ArrayList<>();
+        sourceBuilderList.add(new TermsValuesSourceBuilder(aggName).field(field));
+
+        CompositeAggregationBuilder aggBuilder =
                 AggregationBuilders
-                        .terms(aggName)
-                        .field(field)
-                        .size(10);
+                        .composite(aggName, sourceBuilderList)
+                        .size(20);
+
+        if (Objects.nonNull(afterKey))
+            aggBuilder.aggregateAfter(afterKey);
 
         String subAggName = "topHits";
         AbstractAggregationBuilder subAggBuilder =
@@ -109,36 +113,48 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
         Aggregations aggregations = getAggsForQuery(searchQuery, Document.class);
 
-        Terms duplicateDocsBuckets = aggregations.get(aggName);
+        CompositeAggregation duplicateDocsBuckets = aggregations.get(aggName);
+        afterKey = duplicateDocsBuckets.afterKey();
 
-        List<? extends Terms.Bucket> buckets = duplicateDocsBuckets.getBuckets();
+        List<? extends CompositeAggregation.Bucket> buckets = duplicateDocsBuckets.getBuckets();
 
         //bucket key with doc_count
-        Map<String, Long> bucketCounts = buckets.stream().collect(Collectors.toMap(Terms.Bucket::getKeyAsString, Terms.Bucket::getDocCount));
-
-        List<ParentDocument> parentDocuments = getDocumentsByIds(bucketCounts.keySet());
-
-        List<ParentDocument> duplicateGroups = new LinkedList<ParentDocument>();
+        Map<Map<String, Object>, Long> bucketCounts = buckets.stream().collect(Collectors.toMap(CompositeAggregation.Bucket::getKey, CompositeAggregation.Bucket::getDocCount));
+        System.out.println(bucketCounts.keySet());
+        String[] documentIds = bucketCounts.keySet().stream().map(m -> String.valueOf(m.get(aggName))).toArray(String[]::new);
+        System.out.println(documentIds);
+        List<ParentDocument> parentDocuments = getDocumentsByIds(documentIds);
+        System.out.println(parentDocuments.size());
         Map<String, List<Document>> duplicateDocsMap = new HashMap<>();
-        for (Terms.Bucket bucket : buckets) {
+        for (CompositeAggregation.Bucket bucket : buckets) {
             TopHits topHits = bucket.getAggregations().get(subAggName);
             org.elasticsearch.search.SearchHit[] hits = topHits.getHits().getHits();
             List<Document> duplicateDocs =
                     Arrays.stream(hits)
-                            .map(h -> objectMapper.convertValue(h.getSourceAsString(), Document.class))
+                            .map(h -> {
+                                try {
+                                    return objectMapper.readValue(h.getSourceAsString(), Document.class);
+                                } catch (JsonProcessingException e) {
+                                    throw new RuntimeException(e);
+                                }
+                            })
                             .collect(Collectors.toList());
-            duplicateDocsMap.put(bucket.getKeyAsString(), duplicateDocs);
-
+            duplicateDocsMap.put(String.valueOf(bucket.getKey().get(aggName)), duplicateDocs);
+            System.out.println(bucket.getKeyAsString());
+            System.out.println(duplicateDocs);
         }
 
         parentDocuments.forEach(d -> d.setDuplicates(duplicateDocsMap.get(d.getId())));
-        return parentDocuments;
+        return new AggResult<>(parentDocuments, afterKey);
     }
 
-    private List<ParentDocument> getDocumentsByIds(Collection<String> docIds) {
+    private List<ParentDocument> getDocumentsByIds(String[] docIds) {
+
+        QueryBuilder idsQuery = QueryBuilders.idsQuery().addIds(docIds);
         NativeSearchQuery searchQuery = new NativeSearchQueryBuilder()
-                .withIds(docIds)
+                .withQuery(idsQuery)
                 .build();
+
         return getDocumentsForQuery(searchQuery, ParentDocument.class);
 
     }
@@ -164,20 +180,40 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
     @Override
     public List<Document> getDuplicateDocs(String customerId, String docId, int pageNum, int pageSize) {
-        return documentRepository.findDocumentsByDuplicateId(docId);
+
+        QueryBuilder queryBuilder = QueryBuilders.boolQuery()
+                .must(QueryBuilders.termQuery("clientid", customerId))
+                .must(QueryBuilders.termQuery("id", docId));
+
+        QueryBuilder filterQuery = QueryBuilders
+                .boolQuery()
+                .filter(queryBuilder);
+
+        NativeSearchQuery searchQuery = new NativeSearchQueryBuilder()
+                .withQuery(filterQuery)
+                .build()
+                .setPageable(PageRequest.of(pageNum, pageSize));
+
+        return getDocumentsForQuery(searchQuery, Document.class);
     }
 
     @Override
-    public List<Discrepancy> getDiscrepancies(String custmerId, String afterKey) {
+    public AggResult<List<Discrepancy>> getDiscrepancies(String customerId, Map<String, Object> afterKey) {
 
         String aggName = "groupByLabel";
         String field = "label";
 
-        AbstractAggregationBuilder aggBuilder =
+        List<CompositeValuesSourceBuilder<?>> sourceBuilderList = new ArrayList<>();
+        sourceBuilderList.add(new TermsValuesSourceBuilder(aggName).field(field));
+
+        CompositeAggregationBuilder aggBuilder =
                 AggregationBuilders
-                        .terms(aggName)
-                        .field(field)
-                        .size(10);
+                        .composite(aggName, sourceBuilderList)
+                        .size(20);
+
+        if (Objects.nonNull(afterKey))
+            aggBuilder.aggregateAfter(afterKey);
+
 
         String subAggName = "byCompositeField";
         String subAggField = "mc_type";
@@ -189,9 +225,15 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
         aggBuilder.subAggregation(subAggBuilder);
 
+        QueryBuilder queryBuilder = QueryBuilders
+                .termQuery("clientid", customerId);
+
         NativeSearchQuery searchQuery = new NativeSearchQueryBuilder()
+                .withQuery(queryBuilder)
                 .addAggregation(aggBuilder)
                 .build();
+
+        searchQuery.setMaxResults(0);
 
         Aggregations aggregations = getAggsForQuery(searchQuery, Document.class);
 
@@ -212,6 +254,6 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                     .collect(Collectors.toList());
             discrepanciesList.add(new Discrepancy(systemClassification, userClassification));
         }
-        return discrepanciesList;
+        return new AggResult<>(discrepanciesList, null);
     }
 }

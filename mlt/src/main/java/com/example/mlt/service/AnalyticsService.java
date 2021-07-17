@@ -1,19 +1,21 @@
 package com.example.mlt.service;
 
+import com.example.mlt.models.AggResult;
 import com.example.mlt.models.Discrepancy;
 import com.example.mlt.models.Document;
 import com.example.mlt.models.ParentDocument;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 public interface AnalyticsService {
 
     /* returns Duplicate document groups per customer
-    *  by default it will return only 20 groups
-    *  provide last group key to fetch next page
-    * */
-    public List<ParentDocument> getDuplicateDocGroups(String customerId, String afterKey);
+     *  by default it will return only 20 groups
+     *  provide last group key to fetch next page
+     * */
+    public AggResult<List<ParentDocument>> getDuplicateDocGroups(String customerId, Map<String, Object> afterKey);
 
     /*  returns duplicate documents for a original document.
      *  provide pageNum and pageSize to fetch next page
@@ -33,5 +35,5 @@ public interface AnalyticsService {
      *  by default it will return only 20 groups
      *  provide last group key to fetch next page
      * */
-    public List<Discrepancy> getDiscrepancies(String customerId, String afterKey);
+    public AggResult<List<Discrepancy>> getDiscrepancies(String customerId, Map<String, Object> afterKey);
 }
