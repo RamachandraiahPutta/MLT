@@ -71,7 +71,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     @Override
     public List<Document> getUnlabelledDocuments(String customerId, int pageNum, int pageSize) {
         QueryBuilder queryBuilder = QueryBuilders.boolQuery()
-                .must(QueryBuilders.termQuery("clientid", customerId))
+                .must(QueryBuilders.termQuery("clientid.keyword", customerId))
                 .mustNot(QueryBuilders.existsQuery("label"));
 
         NativeSearchQuery searchQuery = new NativeSearchQueryBuilder()
@@ -183,7 +183,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     public List<Document> getDuplicateDocs(String customerId, String docId, int pageNum, int pageSize) {
 
         QueryBuilder queryBuilder = QueryBuilders.boolQuery()
-                .must(QueryBuilders.termQuery("clientid", customerId))
+                .must(QueryBuilders.termQuery("clientid.keyword", customerId))
                 .must(QueryBuilders.termQuery("id", docId));
 
         QueryBuilder filterQuery = QueryBuilders
@@ -202,7 +202,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     public AggResult<List<Discrepancy>> getDiscrepancies(String customerId, Map<String, Object> afterKey) {
 
         String aggName = "groupByLabel";
-        String field = "label";
+        String field = "label.keyword";
 
         List<CompositeValuesSourceBuilder<?>> sourceBuilderList = new ArrayList<>();
         sourceBuilderList.add(new TermsValuesSourceBuilder(aggName).field(field));
@@ -216,7 +216,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
             aggBuilder.aggregateAfter(afterKey);
 
         String subAggName = "byCompositeField";
-        String subAggField = "mc_type";
+        String subAggField = "mc_type.keyword";
         AbstractAggregationBuilder subAggBuilder =
                 AggregationBuilders
                         .terms(subAggName)
@@ -226,7 +226,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         aggBuilder.subAggregation(subAggBuilder);
 
         QueryBuilder queryBuilder = QueryBuilders
-                .termQuery("clientid", customerId);
+                .termQuery("clientid.keyword", customerId);
 
         NativeSearchQuery searchQuery = new NativeSearchQueryBuilder()
                 .withQuery(queryBuilder)
@@ -237,24 +237,25 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
         Aggregations aggregations = getAggsForQuery(searchQuery, Document.class);
 
-        Terms termAggregation = aggregations.get(aggName);
+        CompositeAggregation compositeAggregation = aggregations.get(aggName);
+        afterKey = compositeAggregation.afterKey();
 
-        List<? extends Terms.Bucket> bucketsByLabel = termAggregation.getBuckets();
+        List<? extends CompositeAggregation.Bucket> bucketsByLabel = compositeAggregation.getBuckets();
 
         Map<String, Long> labelCounts = bucketsByLabel.stream().collect(
-                Collectors.toMap(Terms.Bucket::getKeyAsString, Terms.Bucket::getDocCount));
+                Collectors.toMap(CompositeAggregation.Bucket::getKeyAsString, CompositeAggregation.Bucket::getDocCount));
 
         List<Discrepancy> discrepanciesList = new LinkedList<>();
-        for (Terms.Bucket bucket : bucketsByLabel) {
+        for (CompositeAggregation.Bucket bucket : bucketsByLabel) {
             Terms termSubAggregation = bucket.getAggregations().get(subAggName);
             List<? extends Terms.Bucket> bucketsBymcType = termSubAggregation.getBuckets();
-            Pair systemClassification = new Pair(bucket.getKeyAsString(), bucket.getDocCount());
+            Pair systemClassification = new Pair(String.valueOf(bucket.getKey().get(aggName)), bucket.getDocCount());
             List<Pair> userClassification = bucketsBymcType.stream()
                     .map(b -> new Pair(b.getKeyAsString(), b.getDocCount()))
                     .collect(Collectors.toList());
             discrepanciesList.add(new Discrepancy(systemClassification, userClassification));
         }
-        return new AggResult<>(discrepanciesList, null);
+        return new AggResult<>(discrepanciesList, afterKey);
     }
 
     @Override
@@ -263,20 +264,30 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         if (mltDocs.isEmpty())
             return false;
         Document parentDocument = mltDocs.get(0);
+        String duplicateId = getDuplicateId(parentDocument);
         Optional<String> label = getClassification(mltDocs);
 
-        String script = "";
-        UpdateQuery updateQuery = UpdateQuery.builder(docId).withScript(script).build();
+        StringBuilder script = new StringBuilder(String.format("ctx._source.duplicatedId = '%s'; ", duplicateId));
 
-        UpdateResponse updateResponse =  elasticsearchOperations.update(updateQuery, IndexCoordinates.of(DOCS_INDEX));
+        label.ifPresent(l -> script.append(String.format("ctx._source.label = '%s'; ", l)));
+        UpdateQuery updateQuery = UpdateQuery.builder(docId).withScript(script.toString()).build();
 
-        return false;
+        UpdateResponse updateResponse = elasticsearchOperations.update(updateQuery, IndexCoordinates.of(DOCS_INDEX));
+        log.debug(updateResponse.toString());
+        return true;
     }
 
+    private String getDuplicateId(Document mltDoc) {
+        if (Objects.nonNull(mltDoc.getDuplicateId()))
+            return mltDoc.getDuplicateId();
+        return mltDoc.getId();
+    }
 
     private Optional<String> getClassification(List<Document> mltDocs) {
+        if (Objects.isNull(mltDocs))
+            return Optional.empty();
 
-        Optional<String> label = mltDocs.stream().collect(
+        Optional<String> label = mltDocs.stream().filter(d -> Objects.nonNull(d.getLabel())).collect(
                 Collectors.groupingBy(Document::getLabel, Collectors.counting()))
                 .entrySet().stream().max(Comparator.comparing(Map.Entry::getValue))
                 .map(Map.Entry::getKey);
